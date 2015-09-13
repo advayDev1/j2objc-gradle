@@ -35,12 +35,12 @@ task wrapper(type: Wrapper) {
     distributionUrl = 'https://services.gradle.org/distributions/gradle-2.4-all.zip'
 }
 
-group = 'com.github.j2objccontrib.j2objcgradle'
+group = 'com.madvay.j2objcgradle'
 
 // A suffix of -SNAPSHOT means this is not an official release of the
 // system, but built from an intermediate source tree.  See
 // CONTRIBUTING.md on how to update this version number.
-version = '0.4.3-alpha-SNAPSHOT'
+version = '0.4.4-alpha-fork'
 
 test {
     testLogging {
@@ -60,13 +60,14 @@ pluginBundle {
             "J2ObjC enables Java source to be part of an iOS application's build, no editing " +
             "of the generated files is necessary. The goal is to write an app's non-UI code " +
             "(such as application logic and data models) in Java, which is then shared by " +
-            "Android apps, web apps (using GWT), and iOS apps (using J2ObjC)."
+            "Android apps, web apps (using GWT), and iOS apps (using J2ObjC)." +
+            "NOTE: Please use the main plugin instead: https://plugins.gradle.org/plugin/com.github.j2objccontrib.j2objcgradle"
     tags = ['android', 'java', 'j2objc', 'ios', 'iphone', 'objective-c', 'xcode']
 
     plugins {
         j2objcPlugin {
-            id = 'com.github.j2objccontrib.j2objcgradle'
-            displayName = 'J2ObjC Gradle Plugin'
+            id = 'com.madvay.j2objcgradle'
+            displayName = 'J2ObjC Gradle Plugin - madvay fork'
         }
     }
 }
