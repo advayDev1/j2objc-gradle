@@ -40,7 +40,7 @@ group = 'com.madvay.j2objcgradle'
 // A suffix of -SNAPSHOT means this is not an official release of the
 // system, but built from an intermediate source tree.  See
 // CONTRIBUTING.md on how to update this version number.
-version = '0.4.5-alpha-fork'
+version = '0.4.8-alpha-fork'
 
 test {
     testLogging {
