@@ -7,14 +7,34 @@ https://github.com/j2objc-contrib/j2objc-gradle/pull/NNN
 # Prerelease Alphas
 
 ## vNext (HEAD)
-Functionality:
+New functionality:
+* Support for Xcode 7 and j2objc 0.9.8.2.1 #483
+* `J2objcConfig.minIosVersion` controls minimum iOS version #483
+
+Breaking changes/functionality:
+* No longer supports Xcode 6 and lower or j2objc 0.9.8.2 and lower #483
+
+Code quality:
+* Multi-project integration tests disabled temporarily (system tests are used instead) #483
+
+## v0.4.3-alpha
+New functionality:
 * Automatic dependency resolution for Maven jars and Gradle projects #420
 * Build external Java libraries (with source) into standalone native libraries #431
 * Proper limitation of functionality on non-Mac platforms #396
 * Embedded docs and versioning info for easier debugging #395
+* Specify a subset of J2ObjC libraries to link to #433
+* Map individual Java files to a separate version used only for J2ObjC translation #455
+* Projects no longer need to guarantee the Java plugin is applied before the J2ObjC Gradle plugin #453
+
+Breaking changes/functionality:
 * Default supported architectures reduced to modern devices only (arm64, armv7, x86_64) #448
+* Production (main sourceSet) and test code are now translated and built separately #474
+* `J2objcConfig.filenameCollisionCheck` is now named `forceFilenameCollisionCheck`,
+  and defaults true only when using `--no-package-directories` #470
 
 Code quality:
+* A small number of [common open-source Java libraries](https://github.com/j2objc-contrib/j2objc-common-libs-e2e-test) are being built end-to-end with the J2ObjC Gradle plugin
 * Continuous integration on Mac #406 and on Windows #401
 * Added end to end tests on OSX (running j2objc) #409 #411 etc.
 * Unit tests pass on Windows #404
