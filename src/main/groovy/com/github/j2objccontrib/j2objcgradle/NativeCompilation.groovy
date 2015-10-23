@@ -87,12 +87,12 @@ class NativeCompilation {
                 switch (targetSpec) {
                     case TargetSpec.TARGET_IOS_DEVICE:
                         clangArgs += iphoneClangArgs
-                        clangArgs += ["-miphoneos-version-min=${config.minIosVersion}"]
+                        clangArgs += ["-miphoneos-version-min=${config.minVersionIos}"]
                         linkerArgs += ["-L$j2objcPath/lib"]
                         break
                     case TargetSpec.TARGET_IOS_SIMULATOR:
                         clangArgs += simulatorClangArgs
-                        clangArgs += ["-mios-simulator-version-min=${config.minIosVersion}"]
+                        clangArgs += ["-mios-simulator-version-min=${config.minVersionIos}"]
                         linkerArgs += ["-L$j2objcPath/lib"]
                         break
                     case TargetSpec.TARGET_OSX:
@@ -237,6 +237,9 @@ class NativeCompilation {
                             beforeProjects.each { Project beforeProject ->
                                 lib project: beforeProject.path, library: "${beforeProject.name}-j2objc", linkage: 'static'
                             }
+                            beforeTestProjects.each { Project beforeProject ->
+                                lib project: beforeProject.path, library: "${beforeProject.name}-j2objc", linkage: 'static'
+                            }
                             j2objcConfig.extraNativeLibs.each { Map nativeLibSpec ->
                                 lib nativeLibSpec
                             }
@@ -285,8 +288,16 @@ class NativeCompilation {
                     linker.args j2objcConfig.extraLinkerArgs
 
                     if (buildType == buildTypes.debug) {
+                        // Full debugging information.
                         objcCompiler.args '-g'
                         objcCompiler.args '-DDEBUG=1'
+                    } else {  // release
+                        // Per https://raw.githubusercontent.com/llvm-mirror/clang/8eb384a97cfdc244a5ab81026677bcbaf8cf2ecf/docs/CommandGuide/clang.rst
+                        // this is a moderate level of optimization with extra optimizations
+                        // to reduce code size.  It's use in release builds was verified in Xcode 7,
+                        // and we aim to match the behavior, per:
+                        // https://developer.apple.com/library/ios/qa/qa1795/_index.html#//apple_ref/doc/uid/DTS40014195-CH1-COMPILER
+                        objcCompiler.args '-Os'
                     }
                 }
             }
@@ -296,21 +307,25 @@ class NativeCompilation {
             // https://docs.gradle.org/current/userguide/nativeBinaries.html#N161B3
             task('j2objcBuildObjcDebug').configure {
                 dependsOn binaries.withType(NativeLibraryBinary).matching { NativeLibraryBinary lib ->
+                    // Internal build type is lowercase 'debug'
                     lib.buildable && lib.buildType.name == 'debug'
                 }
             }
             task('j2objcBuildObjcRelease').configure {
                 dependsOn binaries.withType(NativeLibraryBinary).matching { NativeLibraryBinary lib ->
+                    // Internal build type is lowercase 'release'
                     lib.buildable && lib.buildType.name == 'release'
                 }
             }
         }
     }
 
-    private List<Project> beforeProjects = []
+    // Public visibility so XcodeTask can apply dependency Podspecs to Podfile
+    public List<Project> beforeProjects = []
+    private List<Project> beforeTestProjects = []
     @PackageScope
-    void dependsOnJ2objcLib(Project beforeProject) {
-        boolean added = beforeProjects.add(beforeProject)
+    void dependsOnJ2objcLib(Project beforeProject, boolean isTest) {
+        boolean added = (isTest ? beforeTestProjects : beforeProjects).add(beforeProject)
         assert added
     }
 }

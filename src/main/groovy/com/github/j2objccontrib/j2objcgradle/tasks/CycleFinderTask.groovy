@@ -24,6 +24,7 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.file.FileTree
 import org.gradle.api.internal.file.UnionFileCollection
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
@@ -35,13 +36,25 @@ import org.gradle.api.tasks.TaskAction
 @CompileStatic
 class CycleFinderTask extends DefaultTask {
 
+    // If the j2objc distribution changes, we want to rerun the task completely.
+    // As an InputFile, if the content changes, the task will re-run in non-incremental mode.
+    @InputFile
+    File getCycleFinderJar() {
+        return Utils.cycleFinderJar(project)
+    }
+
+    @SuppressWarnings("GroovyUnusedDeclaration")
+    @Input String getJ2objcVersion() {
+        return J2objcConfig.from(project).j2objcVersion
+    }
+
     @InputFiles
     FileCollection getSrcInputFiles() {
         // Note that translatePattern does not need to be an @Input because it is
         // solely an input to this method, which is already an input (via @InputFiles).
         FileTree allFiles = Utils.srcSet(project, 'main', 'java')
         allFiles = allFiles.plus(Utils.srcSet(project, 'test', 'java'))
-        FileTree ret = allFiles
+        FileTree ret = allFiles.plus(Utils.javaTrees(project, getGeneratedSourceDirs()))
         if (J2objcConfig.from(project).translatePattern != null) {
             ret = allFiles.matching(J2objcConfig.from(project).translatePattern)
         }
@@ -51,13 +64,10 @@ class CycleFinderTask extends DefaultTask {
     // All input files that could affect translation output, except those in j2objc itself.
     @InputFiles
     UnionFileCollection getAllInputFiles() {
-        // Only care about changes in the generatedSourceDirs paths and not the contents
-        // Assumes that any changes in generated code causes change in non-generated @Input
         return new UnionFileCollection([
                 getSrcInputFiles(),
                 project.files(getTranslateClasspaths()),
-                project.files(getTranslateSourcepaths()),
-                project.files(getGeneratedSourceDirs())
+                project.files(getTranslateSourcepaths())
         ])
     }
 
@@ -101,7 +111,7 @@ class CycleFinderTask extends DefaultTask {
         if (Utils.isWindows()) {
             cycleFinderExec = 'java'
             windowsOnlyArgs.add('-jar')
-            windowsOnlyArgs.add("${getJ2objcHome()}/lib/cycle_finder.jar".toString())
+            windowsOnlyArgs.add(getCycleFinderJar().absolutePath)
         }
 
         FileCollection fullSrcFiles = getSrcInputFiles()
@@ -109,10 +119,6 @@ class CycleFinderTask extends DefaultTask {
         // TODO: Need to understand why generated source dirs are treated differently by CycleFinder
         // vs. translate task.  Here they are directly passed to the binary, but in translate
         // they are only on the translate source path (meaning they will only be translated with --build-closure).
-
-        // Generated Files
-        // Assumes that any changes in generated code causes change in non-generated @Input
-        fullSrcFiles = fullSrcFiles.plus(Utils.javaTrees(project, getGeneratedSourceDirs()))
 
         UnionFileCollection sourcepathDirs = new UnionFileCollection([
                 project.files(Utils.srcSet(project, 'main', 'java').getSrcDirs()),

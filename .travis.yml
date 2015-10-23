@@ -22,9 +22,18 @@ matrix:
       osx_image: xcode7
       language: objective-c
       env:
+       - TEST_SET=1
        - USING_OS=osx
        - USING_XCODE=7
-       - J2OBJC_VERSION=0.9.8.2.1
+    # Split up the system tests into 2 sets to avoid hitting the
+    # max build time.
+    - os: osx
+      osx_image: xcode7
+      language: objective-c
+      env:
+       - TEST_SET=2
+       - USING_OS=osx
+       - USING_XCODE=7
 
 branches:
   only:
@@ -34,6 +43,16 @@ branches:
 
 # We can be run in a container for improved performance.
 sudo: false
+
+before_install:
+  # Don't spew graphic art.
+  - export TERM=dumb
+  - env
+  # Cocoapods must be manually due to issues with Travis:
+  # http://docs.travis-ci.com/user/common-build-problems/#Mac%3A-Errors-running-CocoaPods
+  - if [ "$USING_OS" = "osx" ]; then gem install cocoapods -v '0.39.0'; fi
+  # Travis doesn't let us select the JDK version on OS X.  Force it ourselves.
+  - if [ "$USING_OS" = "osx" ]; then ./install-osx-jdk7.sh; fi
 
 # If these steps fail, the build is 'errored' - i.e. misconfigured.
 # This can fail if we cannot download Gradle 2.4 or the libraries
@@ -46,7 +65,7 @@ install:
   - ./gradlew wrapper
   - ./gradlew dependencies
   # Prepare our system tests
-  - if [ "$USING_OS" = "osx" ]; then (pushd systemTests && ./prep.sh && popd); fi
+  - if [ "$USING_OS" = "osx" ]; then systemTests/install.sh; fi
 
 # If these steps fail, the build is 'failed' - i.e. we have a code defect.
 # We compile (assemble) and then build (which also tests) to capture build
@@ -55,4 +74,4 @@ script:
   - ./gradlew assemble
   - ./gradlew build
   # Run our system tests
-  - if [ "$USING_OS" = "osx" ]; then (pushd systemTests && ./run-all.sh && popd); fi
+  - if [ "$USING_OS" = "osx" ]; then systemTests/run-all.sh $TEST_SET; fi

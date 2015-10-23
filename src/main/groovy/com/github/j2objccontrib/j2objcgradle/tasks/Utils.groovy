@@ -16,6 +16,7 @@
 
 package com.github.j2objccontrib.j2objcgradle.tasks
 
+import com.github.j2objccontrib.j2objcgradle.J2objcConfig
 import com.google.common.annotations.VisibleForTesting
 import groovy.transform.CompileStatic
 import groovy.transform.TypeCheckingMode
@@ -27,7 +28,9 @@ import org.gradle.api.Nullable
 import org.gradle.api.Project
 import org.gradle.api.file.CopySpec
 import org.gradle.api.file.FileCollection
+import org.gradle.api.file.FileTree
 import org.gradle.api.file.SourceDirectorySet
+import org.gradle.api.internal.file.UnionFileTree
 import org.gradle.api.plugins.JavaPluginConvention
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.WorkResult
@@ -60,10 +63,40 @@ class Utils {
         }
     }
 
+    static List<Integer> parseVersionComponents(String ver) {
+        return ver.tokenize('.').collect({String versionComponent ->
+            try {
+                return Integer.parseInt(versionComponent)
+            } catch (NumberFormatException nfe) {
+                // Keep it simple.  If the version provided doesn't meet a simple N.N.N format,
+                // assume the user knows what they are doing and keep going.  The maximum integer
+                // provides this behavior.
+                return Integer.MAX_VALUE
+            }
+        })
+    }
+
+    static boolean isAtLeastVersion(String version, String minVersion) {
+        List<Integer> minVersionComponents = parseVersionComponents(minVersion)
+        List<Integer> versionComponents = parseVersionComponents(version)
+        for (int i = 0; i < Math.min(minVersionComponents.size(), versionComponents.size()); i++) {
+            if (versionComponents[i] > minVersionComponents[i]) {
+                return true
+            } else if (versionComponents[i] < minVersionComponents[i]) {
+                return false
+            }
+        }
+        // Each existing component was equal.  If the requested version is at least as long, we're good.
+        return versionComponents.size() >= minVersionComponents.size()
+    }
+
+
     private static String fakeOSName = ''
 
-    // This allows faking of is(Linux|Windows|MacOSX) methods but misses java.io.File separators
-    // One of the following four methods should be called in @Before method to isolate test state
+    /* This allows faking of is(Linux|Windows|MacOSX) methods but misses java.io.File separators.
+     *
+     * The setFakeOsNone() should be called in the test unit @After method to isolate test state.
+     */
     @VisibleForTesting
     static void setFakeOSLinux() {
         fakeOSName = 'Linux'
@@ -79,7 +112,7 @@ class Utils {
         fakeOSName = 'Windows'
     }
 
-    // Unset fake os, should be needed for @Before method
+    // Unset fake os, should be used in @After method
     @VisibleForTesting
     static void setFakeOSNone() {
         fakeOSName = ''
@@ -144,6 +177,28 @@ class Utils {
         } else {
             return ':'
         }
+    }
+
+    // Same as URI.relativize(...) method but works for non-parent directories
+    // by adding '../../' when necessary to find a common parent
+    static String relativizeNonParent(File src, File dst) {
+        URI dstUri = dst.toURI()
+        URI relativized
+        String upDirPrefix = ''
+
+        while (true) {
+            relativized = src.toURI().relativize(dstUri)
+            if (relativized != dstUri) {
+                // Relative path found
+                break
+            }
+
+            upDirPrefix += '../'
+            src = src.getParentFile()
+            assert (src != null)
+        }
+
+        trimTrailingForwardSlash(upDirPrefix + relativized.toString())
     }
 
     static void throwIfNoJavaPlugin(Project proj) {
@@ -221,28 +276,61 @@ class Utils {
     static String j2objcHome(Project proj) {
         String j2objcHome = getLocalProperty(proj, 'home')
         if (j2objcHome == null) {
-            String message =
-                    "J2ObjC Home not set, this should be configured either:\n" +
-                    "1) in a 'local.properties' file in the project root directory as:\n" +
-                    "   j2objc.home=/LOCAL_J2OBJC_PATH\n" +
-                    "2) as the J2OBJC_HOME system environment variable\n" +
-                    "\n" +
-                    "If both are configured the value in the properties file will be used.\n" +
-                    "\n" +
-                    "It must be the path of the unzipped J2ObjC distribution. Download releases here:\n" +
-                    "https://github.com/google/j2objc/releases"
-            throw new InvalidUserDataException(message)
+            throwJ2objcConfigFailure(proj, "J2ObjC Home not set.")
         }
         File j2objcHomeFile = new File(j2objcHome)
         if (!j2objcHomeFile.exists()) {
-            String message = "J2OjcC Home directory not found, expected location: ${j2objcHome}"
-            throw new InvalidUserDataException(message)
+            throwJ2objcConfigFailure(proj, "J2ObjC Home directory not found, expected at $j2objcHome.")
         }
         // File removes trailing slashes cause problems with string concatenation logic
         return j2objcHomeFile.absolutePath
     }
 
-    static String j2objcHasOsxDistribution(Project proj) {
+    static File j2objcJar(Project proj) {
+        return proj.file("${j2objcHome(proj)}/lib/j2objc.jar")
+    }
+
+    static File cycleFinderJar(Project proj) {
+        return proj.file("${j2objcHome(proj)}/lib/cycle_finder.jar")
+    }
+
+    static void throwJ2objcConfigFailure(Project proj, String preamble) {
+        String propFile = "${proj.rootDir.absolutePath}/local.properties"
+        // This can be null in tests!
+        J2objcConfig config = J2objcConfig.from(proj)
+        String ver = config == null ? '(unknown version)' : config.j2objcVersion
+        String message = ">>>>>>>>>>>>>>>> J2ObjC Tool Configuration Failure <<<<<<<<<<<<<<<<\n" +
+                         "$preamble\n" +
+                         "\n" +
+                         "If you do not have a J2ObjC v${ver} distribution,\n" +
+                         "you can initiate a default installation of J2ObjC\n" +
+                         "by running the following from a Terminal:\n" +
+                         "\n" +
+                         "  J2OBJC_ROOT=~/j2objcDist\n" +
+                         // Create a distribution parent directory for all versions.
+                         "  mkdir -p \$J2OBJC_ROOT; pushd \$J2OBJC_ROOT\n" +
+                         // Download an official release.
+                         "  curl -L https://github.com/google/j2objc/releases/download/${ver}/j2objc-${ver}.zip > j2objc-${ver}.zip\n" +
+                         // Unzip the distribution (only).
+                         "  unzip j2objc-${ver}.zip; popd\n" +
+                         // Eliminate any existing value in local.properties.
+                         "  sed -i '' '/j2objc.home/d' $propFile\n" +
+                         // Add a new value for j2objc.home to local.properties.
+                         "  echo j2objc.home=\$J2OBJC_ROOT/j2objc-${ver} >> $propFile\n" +
+                         "\n" +
+                         "Then rerun your Gradle build.\n" +
+                         "\n" +
+                         "For advanced configuration of J2ObjC, please see http://j2objc.org/\n" +
+                         "If J2ObjC v${ver} is already installed, set J2ObjC Home either:\n" +
+                         "1) in a 'local.properties' file in the project root directory as:\n" +
+                         "   j2objc.home=/LOCAL_J2OBJC_PATH\n" +
+                         "2) as the J2OBJC_HOME system environment variable\n" +
+                         "\n" +
+                         "If both are configured the value in the properties file will be used."
+        throw new InvalidUserDataException(message)
+    }
+
+    static boolean j2objcHasOsxDistribution(Project proj) {
         return proj.file("${j2objcHome(proj)}/lib/macosx").exists()
     }
 
@@ -322,14 +410,10 @@ class Utils {
     }
 
     // Add list of java path to a FileCollection as a FileTree
-    static FileCollection javaTrees(Project proj, List<String> treePaths) {
-        FileCollection files = proj.files()
-        treePaths.each { String treePath ->
-            log.debug "javaTree: $treePath"
-            files = files.plus(
-                    proj.files(proj.fileTree(dir: treePath, includes: ["**/*.java"])))
-        }
-        return files
+    static FileTree javaTrees(Project proj, List<String> treePaths) {
+        List<? extends FileTree> trees =
+            treePaths.collect({ String treePath -> proj.fileTree(dir: treePath, includes: ["**/*.java"]) })
+        return new UnionFileTree("javaTrees_j2objc", trees)
     }
 
     static List<String> j2objcLibs(String j2objcHome,
@@ -363,6 +447,16 @@ class Utils {
     // http://docs.groovy-lang.org/latest/html/documentation/#_slashy_string
     static String escapeSlashyString(String regex) {
         return '/' + regex.replace('/', '\\/') + '/'
+    }
+
+    static String greatestCommonPrefix(String a, String b) {
+        int minLength = Math.min(a.length(), b.length());
+        for (int i = 0; i < minLength; i++) {
+            if (a.charAt(i) != b.charAt(i)) {
+                return a.substring(0, i);
+            }
+        }
+        return a.substring(0, minLength);
     }
 
     // Matches regex, return first match as string, must have >1 capturing group

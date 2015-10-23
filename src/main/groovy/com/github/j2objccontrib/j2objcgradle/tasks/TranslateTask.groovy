@@ -24,6 +24,7 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.file.FileTree
 import org.gradle.api.internal.file.UnionFileCollection
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
@@ -36,12 +37,20 @@ import org.gradle.api.tasks.incremental.InputFileDetails
 @CompileStatic
 class TranslateTask extends DefaultTask {
 
-    // Source files outside of the Java main sourceSet.
-    FileCollection additionalMainSrcFiles
+    // Note that translatePattern need not be @Inputs because it is solely an inputs
+    // to the 2 methods below, which are already @InputFiles.
 
-    // Note that neither additionalMainSrcFiles nor translatePattern need
-    // to be @Inputs because they are solely inputs to the 2 methods below, which
-    // are already @InputFiles.
+    // If the j2objc distribution changes, we want to rerun the task completely.
+    // As an InputFile, if the content changes, the task will re-run in non-incremental mode.
+    @InputFile
+    File getJ2objcJar() {
+        return Utils.j2objcJar(project)
+    }
+
+    @SuppressWarnings("GroovyUnusedDeclaration")
+    @Input String getJ2objcVersion() {
+        return J2objcConfig.from(project).j2objcVersion
+    }
 
     // Source files part of the Java main sourceSet.
     @InputFiles
@@ -50,12 +59,8 @@ class TranslateTask extends DefaultTask {
         if (J2objcConfig.from(project).translatePattern != null) {
             allFiles = allFiles.matching(J2objcConfig.from(project).translatePattern)
         }
-        FileCollection ret = allFiles
+        FileCollection ret = allFiles.plus(Utils.javaTrees(project, getGeneratedSourceDirs()))
         ret = Utils.mapSourceFiles(project, ret, getTranslateSourceMapping())
-
-        if (additionalMainSrcFiles != null) {
-            ret = ret.plus(additionalMainSrcFiles)
-        }
         return ret
     }
 
@@ -78,7 +83,6 @@ class TranslateTask extends DefaultTask {
         allFiles += getTestSrcFiles()
         allFiles += project.files(getTranslateClasspaths())
         allFiles += project.files(getTranslateSourcepaths())
-        allFiles += project.files(getGeneratedSourceDirs())
         // Only care about changes in the generatedSourceDirs paths and not the contents
         // It assumes that any changes in generated code comes from change in non-generated code
         return allFiles
@@ -301,7 +305,7 @@ class TranslateTask extends DefaultTask {
         if (Utils.isWindows()) {
             j2objcExecutable = 'java'
             windowsOnlyArgs.add('-jar')
-            windowsOnlyArgs.add("${getJ2objcHome()}/lib/j2objc.jar".toString())
+            windowsOnlyArgs.add(getJ2objcJar().absolutePath)
         }
 
         String sourcepathArg = Utils.joinedPathArg(sourcepathDirs)

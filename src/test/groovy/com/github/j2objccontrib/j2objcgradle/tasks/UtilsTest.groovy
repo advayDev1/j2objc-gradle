@@ -16,6 +16,7 @@
 
 package com.github.j2objccontrib.j2objcgradle.tasks
 
+import com.github.j2objccontrib.j2objcgradle.J2objcConfig
 import groovy.transform.CompileStatic
 import org.apache.commons.io.output.TeeOutputStream
 import org.gradle.api.InvalidUserDataException
@@ -27,10 +28,12 @@ import org.gradle.process.ExecSpec
 import org.gradle.process.internal.ExecHandleBuilder
 import org.gradle.testfixtures.ProjectBuilder
 import org.gradle.util.GradleVersion
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExpectedException
+import org.testng.Assert
 
 /**
  * Utils tests.
@@ -48,6 +51,11 @@ class UtilsTest {
         // Default to native OS except for specific tests
         Utils.setFakeOSNone()
         proj = ProjectBuilder.builder().build()
+    }
+
+    @After
+    void tearDown() {
+        Utils.setFakeOSNone()
     }
 
     @Test
@@ -177,6 +185,40 @@ class UtilsTest {
     void testPathSeparator_Windows() {
         Utils.setFakeOSWindows()
         assert ';' == Utils.pathSeparator()
+    }
+
+    @Test
+    void testRelativizeNonParent_Parent() {
+        File parent = new File('/A/B/C')
+        File child = new File('/A/B/C/D/E/file')
+
+        URI relative = parent.toURI().relativize(child.toURI())
+        assert relative.toString() == Utils.relativizeNonParent(parent, child)
+        assert 'D/E/file' == Utils.relativizeNonParent(parent, child)
+    }
+
+    @Test
+    void testRelativizeNonParent_NonParent() {
+        File src = new File('/A/B')
+        File dst = new File('/A/C')
+        assert '../C' == Utils.relativizeNonParent(src, dst)
+
+        File src2 = new File('/A/B1/B2')
+        File dst2 = new File('/A/C1/C2')
+        assert '../../C1/C2' == Utils.relativizeNonParent(src2, dst2)
+    }
+
+    @Test
+    void testRelativizeNonParent_Same() {
+        File dir = new File('/A/B/C')
+        assert '' == Utils.relativizeNonParent(dir, dir)
+    }
+
+    @Test
+    void testRelativizeNonParent_Root() {
+        File src = new File('/A/B/C')
+        File dst = new File('/ab/bb/cb')
+        assert '../../../ab/bb/cb' == Utils.relativizeNonParent(src, dst)
     }
 
     @Test(expected = InvalidUserDataException.class)
@@ -429,6 +471,13 @@ class UtilsTest {
     void testEscapeSlashyString() {
         String regex = /forward-slash:\/, newline:\n, multi-digit:\d+/
         assert "/forward-slash:\\/, newline:\\n, multi-digit:\\d+/" == Utils.escapeSlashyString(regex)
+    }
+
+    @Test
+    void testGreatestCommonPrefix() {
+        assert "abc" == Utils.greatestCommonPrefix("abc", "abcd")
+        assert "ab" == Utils.greatestCommonPrefix("abba", "abcd")
+        assert "j2objc-PROJECT-" == Utils.greatestCommonPrefix("j2objc-PROJECT-debug", "j2objc-PROJECT-release")
     }
 
     @Test
@@ -770,5 +819,28 @@ class UtilsTest {
         })
 
         mockProjectExec.verify()
+    }
+
+    @Test
+    void testParseVersionComponents() {
+        Assert.assertEquals(Utils.parseVersionComponents("0.9.8.2.1"),
+                [0, 9, 8, 2, 1])
+        Assert.assertEquals(Utils.parseVersionComponents("10.9.8.1"),
+                [10, 9, 8, 1])
+        Assert.assertEquals(Utils.parseVersionComponents("10.1-SNAPSHOT"),
+                [10, Integer.MAX_VALUE])
+    }
+
+    @Test
+    void testIsAtLeastVersion() {
+        assert Utils.isAtLeastVersion("0.9.8.2.1", "0.9.8.2.1")
+        assert !Utils.isAtLeastVersion("0.9.8.2", "0.9.8.2.1")
+        assert Utils.isAtLeastVersion("0.9.8.2.1", "0.9.8.2")
+        assert Utils.isAtLeastVersion("0.9.8.3", "0.9.8.2.1")
+        assert Utils.isAtLeastVersion("1", "0.9.8.2.1")
+        assert Utils.isAtLeastVersion("1-SNAPSHOT", "0.9.8.2.1")
+        assert Utils.isAtLeastVersion("0.9.8.2.1-SNAPSHOT", "0.9.8.2.1")
+        assert !Utils.isAtLeastVersion("0.9.8.1.2", "0.9.8.2.1")
+        assert !Utils.isAtLeastVersion("0.7.9", "0.9.8.2.1")
     }
 }

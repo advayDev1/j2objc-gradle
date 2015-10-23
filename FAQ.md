@@ -14,9 +14,11 @@ and execute:
 
 Paste the results below, replacing existing contents.
 -->
+- [Start here for debugging (aka it's not working; aka don't panic)](#start-here-for-debugging-aka-its-not-working-aka-dont-panic)
 - [How do I develop with Xcode?](#how-do-i-develop-with-xcode)
 - [How can I speed up my build?](#how-can-i-speed-up-my-build)
 - [What libraries are linked by default?](#what-libraries-are-linked-by-default)
+- [What should I add to .gitignore?](#what-should-i-add-to-gitignore)
 - [What is the recommended folder structure for my app?](#what-is-the-recommended-folder-structure-for-my-app)
 - [What tasks does the plugin add to my project?](#what-tasks-does-the-plugin-add-to-my-project)
 - [What version of Gradle do I need?](#what-version-of-gradle-do-i-need)
@@ -33,14 +35,42 @@ Paste the results below, replacing existing contents.
 - [Error: implicit declaration of function 'JreRelease' is invalid in C99 [-Werror,-Wimplicit-function-declaration] JreRelease(this$0_)](#error-implicit-declaration-of-function-jrerelease-is-invalid-in-c99--werror-wimplicit-function-declaration-jrereleasethis0_)
 - [How do I disable a plugin task?](#how-do-i-disable-a-plugin-task)
 - [How do I setup dependencies with J2ObjC?](#how-do-i-setup-dependencies-with-j2objc)
-- [How do I setup a dependency to a third-party Java library?](#how-do-i-setup-a-dependency-to-a-third-party-java-library)
-- [How do I setup a dependency on a Java project?](#how-do-i-setup-a-dependency-on-a-java-project)
-- [How do I setup a dependency on a prebuilt native library?](#how-do-i-setup-a-dependency-on-a-prebuilt-native-library)
-- [How do I setup a dependency on a native library project?](#how-do-i-setup-a-dependency-on-a-native-library-project)
 - [Cycle Finder Basic Setup](#cycle-finder-basic-setup)
 - [Cycle Finder Advanced Setup](#cycle-finder-advanced-setup)
 - [How do I develop on Windows or Linux?](#how-do-i-develop-on-windows-or-linux)
+- [How do I fix missing required architecture linker warning?](#how-do-i-fix-missing-required-architecture-linker-warning)
 
+### Start here for debugging (aka it's not working; aka don't panic)
+
+Some common misconfigurations can cause numerous Gradle errors.
+
+1. First make sure you have a supported version of j2objc and Xcode
+(see [README.md](README.md) for our current supported versions) installed locally,
+and that your J2OBJC_HOME property is set correctly to the distribution directory
+of j2objc.  This _is not_ the source repository root for j2objc.  The distribution
+directory should have at minimum lib/ and include/ subdirectories.  (If you download
+j2objc release .zip files from https://github.com/google/j2objc, you get only the
+distribution by default.)
+
+2. Verify you are using the latest released version of the plugin.  Forks of the
+plugin exist; if you are looking for help at https://github.com/j2objc-contrib/j2objc-contrib
+(the original), please use the latest version distributed from 
+https://plugins.gradle.org/plugin/com.github.j2objccontrib.j2objcgradle.
+
+3. If you are still getting errors regarding classes, executables, Jars, or libraries that cannot be found,
+and you've verified that your J2OBJC_HOME is set correctly, you may have stale Gradle
+caches, which can be cleared as follows.  Note the following steps will cause you to
+rebuild everything, so the next build may take a long time.
+  ```shell
+  # (from your Gradle project's root directory)
+  # Stops any Gradle daemons if they are running.
+  ./gradlew --stop
+  # Remove cached Gradle database.
+  rm -rf .gradle/
+  # Remove cached Gradle outputs.
+  rm -rf build/
+  ```
+Now try building again.
 
 ### How do I develop with Xcode?
 
@@ -72,6 +102,7 @@ J2OBJC_RELEASE_ENABLED=false ./gradlew build
 
 The `local.properties` value overrides the environment variable, if present.
 
+
 ### What libraries are linked by default?
 
 A number of standard libraries are included with the J2ObjC releases and linked
@@ -79,12 +110,24 @@ by default when using the plugin. To add other libraries, see the FAQs about
 [dependencies](#how-do-i-setup-dependencies-with-j2objc).
 The standard libraries are:
 
-    guava
-    javax_inject
-    jsr305
-    junit
-    mockito
-    protobuf_runtime - TODO: https://github.com/j2objc-contrib/j2objc-gradle/issues/327
+    com.google.guava:guava
+    com.google.j2objc:j2objc-annotations
+    com.google.protobuf:protobuf-java
+    junit:junit (test only)
+    org.mockito:mockito-core (test only)
+    org.hamcrest:hamcrest-core (test only)
+
+
+### What should I add to .gitignore?
+
+The .gitignore file should follow existing conventions for Android Studio and Xcode.
+Once that's configured, check it contains the following:
+
+    # Includes j2objc.home setting (Android Studio should have added this)
+    local.properties
+
+    # CocoaPods temporary files used for Xcode
+    Pods/
 
 
 ### What is the recommended folder structure for my app?
@@ -102,12 +145,12 @@ shown before folders, so it is not in strict alphabetical order.
     │   ├── build.gradle               // dependencies { compile project(':shared') }
     │   └── src/...                    // src/main/java/... and more, only Android specific code
     ├── ios
-    │   ├── IOS-APP.xcworkspace        // Xcode workspace
     │   ├── IOS-APP.xcodeproj          // Xcode project, which is modified by j2objcXcode / CocoaPods
     │   ├── Podfile                    // j2objcXcode modifies this file for use by CocoaPods, committed
-    │   ├── IOS-APP/...                // j2objcXcode configures dependency on j2objcOutputs/{libs|src}
+    │   ├── WORKSPACE.xcworkspace      // Xcode workspace
+    │   ├── IOS-APP/...                // Xcode workspace
     │   ├── IOS-APPTests/...           // j2objcXcode configures as above but with "debug" buildType
-    │   └── Pods/...                   // generated by CocoaPods for Xcode, .gitignore
+    │   └── Pods/...                   // temp files generated by CocoaPods for Xcode, .gitignore
     └── shared
         ├── build.gradle               // apply 'java' then 'j2objc' plugins
         ├── build                      // generated build directory, .gitignore
@@ -333,108 +376,7 @@ j2objcConfig {
 
 ### How do I setup dependencies with J2ObjC?
 
-See the following FAQ answers...
-
-### How do I setup a dependency to a third-party Java library?
-
-These are the kinds of dependencies usually specified as follows in build `shared/build.gradle`.
-We'll use `gson` as an example:
-```gradle
-dependencies {
-    compile 'com.google.code.gson:gson:2.3.1'
-}
-```
-
-Per J2ObjC's documentation: "Developers must have source code for their Android app, which
-they either own or are licensed to use" - which includes libraries.
-The dependencies directive above only associates your project with the .class files,
-not the .java source files, of your third-party dependency.
-
-In order to use such a dependency with J2ObjC, you'll need to find the associated source jars.
-For many libraries and repositories, source jars are available easily from the library page.  For
-example, if you are using `mavenCentral()`, you could find the `gson` source by downloading
-the `gson-2.3.1-sources.jar` file from 
-[search.maven.org](http://search.maven.org/#artifactdetails%7Ccom.google.code.gson%7Cgson%7C2.3.1%7Cjar),
-and putting that in your `shared/srcLibs` directory.
-
-Then add the following to your j2objcConfig:
-```gradle
-j2objcConfig {
-    // This will automatically incorporate just the neccessary files from
-    // the translateSourcepaths.
-    translateArgs '--build-closure'
-    
-    // Repeat for every source jar dependency you have.
-    translateSourcepaths 'srcLibs/gson-2.3.1-sources.jar'
-    
-    ...
-}
-```
-
-In the future, this kind of dependency should be inferred automatically from the corresponding
-Java dependency - [issue 41](https://github.com/j2objc-contrib/j2objc-gradle/issues/41).
-
-Also note that this directly incorporates only the neccessary files from your dependencies into
-your Objective C libraries.  It does not produce a separate `gson` Objective C library that you can
-use standalone.  You would need to create a separate Gradle Java project manually to do that.
-
-### How do I setup a dependency on a Java project?
-
-The Java project must use the [Gradle Java Plugin](https://docs.gradle.org/current/userguide/java_plugin.html).
-If project `shared` depends on Gradle Java Project A, and you want J2Objc generated Project
-`shared` to depend on J2ObjC generated Project A, then add to `shared/build.gradle`:
-
-```gradle
-// File: shared/build.gradle
-j2objcConfig {
-    dependsOnJ2objc project(':A')
-}
-```
-
-Project A needs to have the J2objc Gradle Plugin applied along with `j2objcConfig {...}`.
-This applies transitively, so in turn it may need `dependsOnJ2objc` again, if say A
-depends on Gradle Java Project B. *
-
-The library will be linked in and the headers available for inclusion. Project A will be
-built first.
-
-In the future, this kind of dependency should be inferred automatically from the corresponding
-Java dependency - [issue 41](https://github.com/j2objc-contrib/j2objc-gradle/issues/41).
-
-* Alternatively you can try building using `--build-closure` (TODO: need item on this).
-
-### How do I setup a dependency on a prebuilt native library?
-
-For a Java and J2ObjC project `shared` that depends on library libpreBuilt pre-built outside
-of Gradle in directory /lib/SOMEPATH, with corresponding headers in /include/SOMEPATH.
-Add to `shared/build.gradle`:
-
-```gradle
-// File: shared/build.gradle
-j2objcConfig {
-    extraObjcCompilerArgs '-I/include/SOMEPATH'
-    extraLinkerArgs '-L/lib/SOMEPATH'
-    extraLinkerArgs '-lpreBuilt'
-}
-```
-
-The library will be linked in and the headers available for inclusion. All prebuilt libraries
-must be fat binaries with the architectures defined by `supportedArchs` in
-[j2objcConfig.groovy](https://github.com/j2objc-contrib/j2objc-gradle/blob/master/src/main/groovy/com/github/j2objccontrib/j2objcgradle/J2objcConfig.groovy).
-
-
-### How do I setup a dependency on a native library project?
-
-The dependency must use the Gradle [custom native library](https://docs.gradle.org/current/userguide/nativeBinaries.html#N15F82)
-If project `shared` depends on a called someLibrary from native project A.
-Add to `shared/build.gradle`:
-
-```gradle
-// File: shared/build.gradle
-j2objcConfig {
-    extraNativeLib project: ':A', library: 'someLibrary', linkage: 'static'
-}
-```
+See [dependencies.md](dependencies.md).
 
 
 ### Cycle Finder Basic Setup
@@ -505,4 +447,25 @@ local.properties (the Mac OS X developers should not use this):
 ```properties
 # File: local.properties
 j2objc.translateOnlyMode=true
+```
+
+
+### How do I fix `missing required architecture` linker warning?
+If you see a message similar to:
+```
+ld: warning: ignoring file /PATH/j2objcOutputs/lib/iosDebug/libPROJECT-j2objc.a,
+missing required architecture i386 in file /PATH/j2objcOutputs/lib/iosDebug/libPROJECT-j2objc.a
+(3 slices)
+```
+and additionally get linker errors, you are not building all the neccessary architectures.
+
+By default (for performance), we build only modern iOS device and simulator architectures.
+If you need i386 for older simulators (iPhone 5, 5c and earlier devices), add the following
+to your build.gradle file:
+
+```gradle
+// File: build.gradle
+j2objcConfig {
+    supportedArchs += ['ios_i386']
+}
 ```

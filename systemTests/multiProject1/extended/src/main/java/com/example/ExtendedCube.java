@@ -37,6 +37,6 @@ public class ExtendedCube extends Cube {
 
     @Override
     public String exerciseGuava() {
-        return Joiner.on(';').join('a', 'b', 'c');
+        return Joiner.on("EXT").join('a', 'b', 'c');
     }
 }

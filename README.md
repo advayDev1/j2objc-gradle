@@ -9,9 +9,6 @@ of the generated files is necessary. The goal is to write an app's non-UI code
 (such as application logic and data models) in Java, which is then shared by
 Android apps (natively Java), web apps (using GWT), and iOS apps (using J2ObjC).
 
-__Note:__ Work is in progress for compatibility with Xcode 7 and j2objc 0.9.8.2.1.
-We currently support Xcode 6 and j2objc 0.9.8.1.
-
 [![License](https://img.shields.io/badge/license-Apache%202.0%20License-blue.svg)](https://github.com/j2objc-contrib/j2objc-gradle/blob/master/LICENSE)
 [![OSX and Linux Build Status](https://img.shields.io/travis/j2objc-contrib/j2objc-gradle/master.svg?label=mac and linux build)](https://travis-ci.org/j2objc-contrib/j2objc-gradle)
 [![Windows Build Status](https://img.shields.io/appveyor/ci/madvayApiAccess/j2objc-gradle/master.svg?label=windows build)](https://ci.appveyor.com/project/madvayApiAccess/j2objc-gradle/branch/master)
@@ -42,8 +39,8 @@ plugins {
 
 // Plugin settings:
 j2objcConfig {
-    xcodeProjectDir '../ios'  // Xcode workspace directory (suggested directory name)
-    xcodeTarget 'IOS-APP'     // iOS app target name (replace with existing app name)
+    xcodeProjectDir '../ios'  //  suggested directory name
+    xcodeTargetsIos 'IOS-APP', 'IOS-APPTests'  // replace with your iOS targets
 
     finalConfigure()          // Must be last call to configuration
 }
@@ -51,6 +48,8 @@ j2objcConfig {
 
 Info on additional `j2objcConfig` settings are in
 [J2objcConfig.groovy](https://github.com/j2objc-contrib/j2objc-gradle/blob/master/src/main/groovy/com/github/j2objccontrib/j2objcgradle/J2objcConfig.groovy#L30).
+The Xcode targets may also be set for xcodeTargetsOsx and xcodeTargetsWatchos
+([issue #525 to get watchOS working](https://github.com/j2objc-contrib/j2objc-gradle/issues/525)).
 If your `shared` project depends on any other projects or third-party libraries, you may
 need to [add them manually](FAQ.md#how-do-i-setup-dependencies-with-j2objc) if they aren't
 [linked by default](FAQ.md#what-libraries-are-linked-by-default).
@@ -76,7 +75,8 @@ are the [J2objc Requirements](http://j2objc.org/#requirements).
     * JDK 1.7 or higher
     * Mac workstation or laptop
     * Mac OS X 10.9 or higher
-    * Xcode 6 or higher
+    * Xcode 7 or higher
+    * j2objc 0.9.8.2.1 or higher
 
 
 ### J2ObjC Installation
@@ -98,13 +98,6 @@ be run as follows:
 
     ./gradlew shared:build
 
-During development, to build the libraries and update Xcode (skipping the tests):
-
-    ./gradlew shared:j2objcXcode
-
-For a complete build, run both:
-
-    ./gradlew shared:build shared:j2objcXcode
 
 ### Problems
 

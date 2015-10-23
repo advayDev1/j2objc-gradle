@@ -21,6 +21,7 @@ import com.github.j2objccontrib.j2objcgradle.tasks.AssembleResourcesTask
 import com.github.j2objccontrib.j2objcgradle.tasks.AssembleSourceTask
 import com.github.j2objccontrib.j2objcgradle.tasks.CycleFinderTask
 import com.github.j2objccontrib.j2objcgradle.tasks.PackLibrariesTask
+import com.github.j2objccontrib.j2objcgradle.tasks.PodspecTask
 import com.github.j2objccontrib.j2objcgradle.tasks.TestTask
 import com.github.j2objccontrib.j2objcgradle.tasks.TranslateTask
 import com.github.j2objccontrib.j2objcgradle.tasks.Utils
@@ -37,7 +38,7 @@ import org.gradle.util.GradleVersion
  * Main plugin class for creation of extension object and all the tasks.
  */
 class J2objcPlugin implements Plugin<Project> {
-  
+
     @Override
     void apply(Project project) {
         String version = BuildInfo.VERSION
@@ -46,13 +47,11 @@ class J2objcPlugin implements Plugin<Project> {
         String timestamp = BuildInfo.TIMESTAMP
         project.logger.info("j2objc-gradle plugin: Version $version, Built: $timestamp, Commit: $commit, URL: $url")
         if (!BuildInfo.GIT_IS_CLEAN) {
-            project.logger.error('j2objc-gradle plugin was built with local modification.\n' +
-                                 'If you encounter issues, please use an official release from:\n' +
-                                 '    https://github.com/j2objc-contrib/j2objc-gradle/releases')
+            project.logger.error('WARNING: j2objc-gradle plugin was built with local git modification: ' +
+                                 'https://github.com/j2objc-contrib/j2objc-gradle/releases')
         } else if (version.contains('SNAPSHOT')) {
-            project.logger.warn('j2objc-gradle plugin was built outside of an official release.\n' +
-                                'If you encounter issues, please use an official release from:\n' +
-                                '    https://github.com/j2objc-contrib/j2objc-gradle/releases')
+            project.logger.warn('WARNING: j2objc-gradle plugin was built with SNAPSHOT version: ' +
+                                'https://github.com/j2objc-contrib/j2objc-gradle/releases')
         }
 
         // This avoids a lot of "project." prefixes, such as "project.tasks.create"
@@ -63,11 +62,6 @@ class J2objcPlugin implements Plugin<Project> {
             extensions.create('j2objcConfig', J2objcConfig, project)
 
             afterEvaluate { Project evaluatedProject ->
-
-                // Validate minimally required parameters.
-                // j2objcHome() will throw the appropriate exception internally.
-                assert Utils.j2objcHome(evaluatedProject)
-
                 Utils.throwIfNoJavaPlugin(evaluatedProject)
 
                 if (!evaluatedProject.j2objcConfig.isFinalConfigured()) {
@@ -98,6 +92,9 @@ class J2objcPlugin implements Plugin<Project> {
                     description = 'J2ObjC Java source dependencies that need to be ' +
                                   'partially translated via --build-closure'
                 }
+                // There is no corresponding j2objcTestTranslationClosure - building test code with
+                // --build-closure will almost certainly cause duplicate symbols when linked with
+                // main code.
 
                 // If you want to translate an entire source library, regardless of which parts of the
                 // library code your own code depends on, use this configuration.  This
@@ -111,11 +108,24 @@ class J2objcPlugin implements Plugin<Project> {
                     description = 'J2ObjC Java source libraries that should be fully translated ' +
                                   'and built as stand-alone native libraries'
                 }
+                // Some libraries also provide their test source in a Jar. For example:
+                //   dependencies { compile 'org.apache.commons:commons-compress:1.10:test-sources' }
+                // will cause your project to compile and run full Commons Compress test suite
+                // in both Java and Objective-C.
+                j2objcTestTranslation {
+                    description = 'J2ObjC Java test source code that should be fully translated ' +
+                                  'and built as stand-alone tests'
+                }
 
                 // Currently, we can only handle Project dependencies already translated to Objective-C.
                 j2objcLinkage {
                     description = 'J2ObjC native library dependencies that need to be ' +
-                                  'linked into the final library, and do not need translation'
+                                  'linked into the final main library, and do not need translation'
+                }
+
+                j2objcTestLinkage {
+                    description = 'J2ObjC native library dependencies that need to be ' +
+                                  'linked into the final tests, and do not need translation'
                 }
             }
 
@@ -139,10 +149,6 @@ class J2objcPlugin implements Plugin<Project> {
                     dependsOn: 'j2objcPreBuild') {
                 group 'build'
                 description "Translates all the java source files in to Objective-C using 'j2objc'"
-                additionalMainSrcFiles = files(
-                        fileTree(dir: "build/source/apt",
-                                include: "**/*.java")
-                )
                 // Output directories of 'j2objcTranslate', input for all other tasks
                 srcGenMainDir = j2objcSrcGenMainDir
                 srcGenTestDir = j2objcSrcGenTestDir
@@ -171,7 +177,7 @@ class J2objcPlugin implements Plugin<Project> {
                 group 'verification'
                 // This transitively depends on the 'test' task from the java plugin
                 description 'Runs all tests in the generated Objective-C code'
-                buildType = 'debug'
+                buildType = 'Debug'
                 testBinaryFile = file("${buildDir}/binaries/testJ2objcExecutable/debug/testJ2objc")
             }
             tasks.create(name: 'j2objcTestRelease', type: TestTask,
@@ -179,9 +185,13 @@ class J2objcPlugin implements Plugin<Project> {
                 group 'verification'
                 // This transitively depends on the 'test' task from the java plugin
                 description 'Runs all tests in the generated Objective-C code'
-                buildType = 'release'
+                buildType = 'Release'
                 testBinaryFile = file("${buildDir}/binaries/testJ2objcExecutable/release/testJ2objc")
             }
+            // If both release and debug tests would run, run the debug tests first - ideally
+            // the failure messages will be easier to understand (ex. Java line numbers).
+            lateShouldRunAfter(project, 'j2objcTestRelease', 'j2objcTestDebug')
+
             tasks.create(name: 'j2objcTest', type: DefaultTask,
                     dependsOn: ['j2objcCycleFinder', 'j2objcTestDebug', 'j2objcTestRelease']) {
                 group 'build'
@@ -205,7 +215,7 @@ class J2objcPlugin implements Plugin<Project> {
                 buildType = 'Release'
             }
 
-            // Assemble
+            // Assemble files
             tasks.create(name: 'j2objcAssembleResources', type: AssembleResourcesTask,
                     dependsOn: ['j2objcPreBuild']) {
                 group 'build'
@@ -218,8 +228,9 @@ class J2objcPlugin implements Plugin<Project> {
                 srcGenMainDir = j2objcSrcGenMainDir
                 srcGenTestDir = j2objcSrcGenTestDir
             }
+            // Assemble libaries
             tasks.create(name: 'j2objcAssembleDebug', type: AssembleLibrariesTask,
-                    dependsOn: ['j2objcPackLibrariesDebug', 'j2objcAssembleSource']) {
+                    dependsOn: ['j2objcPackLibrariesDebug', 'j2objcAssembleSource', 'j2objcAssembleResources']) {
                 group 'build'
                 description 'Copies final generated source and debug libraries to assembly directories'
                 buildType = 'Debug'
@@ -227,15 +238,28 @@ class J2objcPlugin implements Plugin<Project> {
                 srcPackedLibDir = file("${buildDir}/packedBinaries/${project.name}-j2objcStaticLibrary")
             }
             tasks.create(name: 'j2objcAssembleRelease', type: AssembleLibrariesTask,
-                    dependsOn: ['j2objcPackLibrariesRelease', 'j2objcAssembleSource']) {
+                    dependsOn: ['j2objcPackLibrariesRelease', 'j2objcAssembleSource', 'j2objcAssembleResources']) {
                 group 'build'
                 description 'Copies final generated source and release libraries to assembly directories'
                 buildType = 'Release'
                 srcLibDir = file("${buildDir}/binaries/${project.name}-j2objcStaticLibrary")
                 srcPackedLibDir = file("${buildDir}/packedBinaries/${project.name}-j2objcStaticLibrary")
             }
+            // Assemble podspec and update Xcode
+            tasks.create(name: 'j2objcPodspec', type: PodspecTask,
+                    // Podspec may reference sources and resources that haven't yet been built
+                    dependsOn: ['j2objcPreBuild']) {
+                group 'build'
+                description 'Generate debug and release podspec that may be used for Xcode'
+            }
+            tasks.create(name: 'j2objcXcode', type: XcodeTask,
+                    dependsOn: 'j2objcPodspec') {
+                group 'build'
+                description 'Depends on j2objc translation, create a Pod file link it to Xcode project'
+            }
+            // Assemble final task
             tasks.create(name: 'j2objcAssemble', type: DefaultTask,
-                    dependsOn: ['j2objcAssembleDebug', 'j2objcAssembleRelease', 'j2objcAssembleResources']) {
+                    dependsOn: ['j2objcAssembleDebug', 'j2objcAssembleRelease', 'j2objcXcode']) {
                 group 'build'
                 description "Marker task for all assembly tasks that take part in regular j2objc builds"
             }
@@ -260,13 +284,6 @@ class J2objcPlugin implements Plugin<Project> {
                 description "Marker task for all tasks that take part in regular j2objc builds"
             }
             lateDependsOn(project, 'build', 'j2objcBuild')
-
-            // TODO: Where shall we fit this task in the plugin lifecycle?
-            tasks.create(name: 'j2objcXcode', type: XcodeTask,
-                    dependsOn: 'j2objcAssemble') {
-                // This is not in the build group because you do not need to do it on every build.
-                description 'Depends on j2objc translation, create a Pod file link it to Xcode project'
-            }
         }
     }
 
@@ -288,6 +305,21 @@ class J2objcPlugin implements Plugin<Project> {
         proj.tasks.all { Task task ->
             if (task.name == afterTaskName) {
                 task.dependsOn beforeTaskName
+            }
+        }
+    }
+
+    // Causes afterTask to run after beforeTaskName iff:
+    //     1) Both afterTask and beforeTask would be run anyway (does not cause beforeTask to
+    //        run, unlike 'dependsOn').
+    // and 2) Such an ordering would not cause a circular dependency.
+    // https://docs.gradle.org/current/userguide/more_about_tasks.html#sec:ordering_tasks
+    private static void lateShouldRunAfter(Project proj, String afterTaskName, String beforeTaskName) {
+        assert null != proj.tasks.findByName(beforeTaskName)
+        // See comments in lateDependsOn for details on this construct.
+        proj.tasks.all { Task task ->
+            if (task.name == afterTaskName) {
+                task.shouldRunAfter beforeTaskName
             }
         }
     }

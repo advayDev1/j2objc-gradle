@@ -29,9 +29,13 @@ dependencies {
     // translates and links it in to the compiled library. No further configuration is required.
     compile 'com.google.code.gson:gson:2.3.1'
     testCompile 'junit:junit:4.12'
+    testCompile project(':testLib')
 }
 
 j2objcConfig {
+    xcodeProjectDir '../ios'
+    xcodeTargetsIos 'IOS-APP', 'IOS-APPTests'
+
     autoConfigureDeps true
 
     finalConfigure()

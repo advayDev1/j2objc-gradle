@@ -19,6 +19,7 @@ import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.artifacts.SelfResolvingDependency
@@ -75,10 +76,18 @@ class DependencyResolver {
         project.configurations.getByName('j2objcTranslation').each { File it ->
             // These are the resolved files, NOT the dependencies themselves.
             // Usually source jars.
-            visitTranslationSourceJar(it)
+            visitTranslationSourceJar(it, false)
+        }
+        project.configurations.getByName('j2objcTestTranslation').each { File it ->
+            // These are the resolved files, NOT the dependencies themselves.
+            // Usually source jars.
+            visitTranslationSourceJar(it, true)
         }
         project.configurations.getByName('j2objcLinkage').dependencies.each {
-            visitLink(it)
+            visitLink(it, false)
+        }
+        project.configurations.getByName('j2objcTestLinkage').dependencies.each {
+            visitLink(it, true)
         }
     }
 
@@ -87,19 +96,26 @@ class DependencyResolver {
         j2objcConfig.enableBuildClosure()
     }
 
-    private static final String EXTRACTION_TASK_NAME = 'j2objcTranslatedLibraryExtraction'
+    private static final String MAIN_EXTRACTION_TASK_NAME = 'j2objcTranslatedMainLibraryExtraction'
+    private static final String TEST_EXTRACTION_TASK_NAME = 'j2objcTranslatedTestLibraryExtraction'
 
     /**
      * Adds to the main java sourceSet a to-be-generated directory that contains the contents
      * of `j2objcTranslation` dependency libraries (if any).
      */
     static void configureSourceSets(Project project) {
+        configureSourceSet(project, "${project.buildDir}/mainTranslationExtraction", SourceSet.MAIN_SOURCE_SET_NAME,
+                MAIN_EXTRACTION_TASK_NAME)
+        configureSourceSet(project, "${project.buildDir}/testTranslationExtraction", SourceSet.TEST_SOURCE_SET_NAME,
+                TEST_EXTRACTION_TASK_NAME)
+    }
+
+    protected static void configureSourceSet(Project project, String dir, String sourceSetName, String taskName) {
         JavaPluginConvention javaConvention = project.getConvention().getPlugin(JavaPluginConvention)
-        SourceSet sourceSet = javaConvention.sourceSets.findByName(SourceSet.MAIN_SOURCE_SET_NAME)
-        String dir = "${project.buildDir}/translationExtraction"
+        SourceSet sourceSet = javaConvention.sourceSets.findByName(sourceSetName)
         sourceSet.java.srcDirs(project.file(dir))
-        Copy copy = project.tasks.create(EXTRACTION_TASK_NAME, Copy,
-                {Copy task ->
+        Copy copy = project.tasks.create(taskName, Copy,
+                { Copy task ->
                     task.into(project.file(dir))
                     // If two libraries define the same file, fail early.
                     task.duplicatesStrategy = DuplicatesStrategy.FAIL
@@ -108,35 +124,35 @@ class DependencyResolver {
     }
 
     // Copy contents of sourceJarFile to build/translationExtraction
-    protected void visitTranslationSourceJar(File sourceJarFile) {
+    protected void visitTranslationSourceJar(File sourceJarFile, boolean isTest) {
         if (!sourceJarFile.absolutePath.endsWith('.jar')) {
-            String msg = "`j2objcTranslation` dependencies can only handle " +
+            String msg = "`j2objc[Test]Translation` dependencies can only handle " +
                          "source jar files, not ${sourceJarFile.absolutePath}"
             throw new InvalidUserDataException(msg)
         }
         PatternSet pattern = new PatternSet()
         pattern.include('**/*.java')
-        Copy copy = project.tasks.getByName(EXTRACTION_TASK_NAME) as Copy
+        Copy copy = project.tasks.getByName(isTest ? TEST_EXTRACTION_TASK_NAME : MAIN_EXTRACTION_TASK_NAME) as Copy
         copy.from(project.zipTree(sourceJarFile).matching(pattern))
     }
 
-    protected void visitLink(Dependency dep) {
+    protected void visitLink(Dependency dep, boolean isTest) {
         if (dep instanceof ProjectDependency) {
-            visitLinkProjectDependency((ProjectDependency) dep)
+            visitLinkProjectDependency((ProjectDependency) dep, isTest)
         } else if (dep instanceof SelfResolvingDependency) {
-            visitLinkSelfResolvingDependency((SelfResolvingDependency) dep)
+            visitLinkSelfResolvingDependency((SelfResolvingDependency) dep, isTest)
         } else {
-            visitLinkGenericDependency(dep)
+            visitLinkGenericDependency(dep, isTest)
         }
     }
 
     protected void visitLinkSelfResolvingDependency(
-            SelfResolvingDependency dep) {
+            SelfResolvingDependency dep, boolean isTest) {
         // TODO: handle native prebuilt libraries as files.
         throw new UnsupportedOperationException("Cannot automatically link J2ObjC dependency: $dep")
     }
 
-    protected void visitLinkProjectDependency(ProjectDependency dep) {
+    protected void visitLinkProjectDependency(ProjectDependency dep, boolean isTest) {
         Project beforeProject = dep.dependencyProject
         // We need to have j2objcConfig on the beforeProject configured first.
         project.evaluationDependsOn beforeProject.path
@@ -161,17 +177,20 @@ class DependencyResolver {
         // Since we assert the presence of the J2objcPlugin above,
         // we are guaranteed that the java plugin, which creates the jar task,
         // is also present.
-        project.tasks.getByName('j2objcPreBuild').dependsOn {
-            return [beforeProject.tasks.getByName('j2objcBuild'),
-                    beforeProject.tasks.getByName('jar')]
-        }
+        Task j2objcPrebuild = project.tasks.getByName('j2objcPreBuild')
+        project.logger.debug("${project.name}:j2objcPreBuild dependsOn ${beforeProject.name}:j2objcBuild")
+        project.logger.debug("${project.name}:j2objcPreBuild dependsOn ${beforeProject.name}:jar")
+        j2objcPrebuild.dependsOn(beforeProject.tasks.getByName('j2objcBuild'))
+        j2objcPrebuild.dependsOn(beforeProject.tasks.getByName('jar'))
+
         AbstractArchiveTask jarTask = beforeProject.tasks.getByName('jar') as AbstractArchiveTask
         project.logger.debug("$project:j2objcTranslate must use ${jarTask.archivePath}")
+        // TODO: Handle separate classpaths for main translation and test translation.
         j2objcConfig.translateClasspaths += jarTask.archivePath.absolutePath
-        j2objcConfig.nativeCompilation.dependsOnJ2objcLib(beforeProject)
+        j2objcConfig.nativeCompilation.dependsOnJ2objcLib(beforeProject, isTest)
     }
 
-    protected void visitLinkGenericDependency(Dependency dep) {
+    protected void visitLinkGenericDependency(Dependency dep, boolean isTest) {
         throw new UnsupportedOperationException("Cannot automatically link J2ObjC dependency: $dep")
     }
 }
